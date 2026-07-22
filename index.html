@@ -370,6 +370,21 @@
 </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDANjE6iGURtUr_2pfxixV3y638RcTZfgc",
+  authDomain: "cena-cumple.firebaseapp.com",
+  databaseURL: "https://cena-cumple-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "cena-cumple",
+  storageBucket: "cena-cumple.firebasestorage.app",
+  messagingSenderId: "23496659362",
+  appId: "1:23496659362:web:a758666443d2f37a2162fb"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+</script>
 <script>
 const POLLS = [
   {
@@ -400,28 +415,11 @@ const POLLS = [
 ];
 
 // ---- Almacén compartido SIN cuenta de Claude ----
-// Usamos kvdb.io: un servicio gratuito y anónimo de clave/valor pensado para
-// usarse directamente desde el navegador. No requiere login para nadie.
-// Si alguna vez quieres cambiar de "cubo" (por ejemplo si notas fallos),
-// basta con cambiar el texto de KV_BUCKET por otro y volver a publicar.
-const KV_BASE = "https://kvdb.io";
-const KV_BUCKET = "UK28xeLkEbRo8Sbv4bGbJe";
-
-async function kvGet(key) {
-  const res = await fetch(`${KV_BASE}/${KV_BUCKET}/${key}`, { cache: "no-store" });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("kv get failed: " + res.status);
-  return res.text();
-}
-
-async function kvSet(key, value) {
-  const res = await fetch(`${KV_BASE}/${KV_BUCKET}/${key}`, {
-    method: "PUT",
-    headers: { "Content-Type": "text/plain" },
-    body: value
-  });
-  if (!res.ok) throw new Error("kv set failed: " + res.status);
-  return true;
+// Usamos Firebase Realtime Database (Google), con reglas públicas de
+// lectura/escritura. No requiere login para nadie que solo vaya a votar.
+function toDbKey(name) {
+  // Las claves de Firebase no pueden contener . # $ [ ] /
+  return name.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.#$\[\]/]/g, "_");
 }
 
 // El nombre solo vive en la memoria de esta pestaña (no se guarda entre
@@ -429,10 +427,6 @@ async function kvSet(key, value) {
 // personal. Si recargas la página, simplemente vuelves a escribir tu nombre.
 let myName = null;
 let myKey = null;
-
-function normalize(name) {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -462,14 +456,14 @@ function hideBanner() {
 
 async function loadPollVotes(poll) {
   try {
-    const text = await kvGet(poll.votesKey);
-    poll.votesByName = text ? JSON.parse(text) : (poll.votesByName || {});
+    const snap = await db.ref(poll.votesKey).once("value");
+    poll.votesByName = snap.val() || {};
   } catch (e) { poll.votesByName = poll.votesByName || {}; }
 }
 
 async function savePollVotes(poll) {
   try {
-    await withRetry(() => kvSet(poll.votesKey, JSON.stringify(poll.votesByName)));
+    await withRetry(() => db.ref(poll.votesKey).set(poll.votesByName));
     hideBanner();
     return true;
   } catch (e) {
@@ -580,7 +574,7 @@ async function setName(rawName) {
   const name = rawName.trim();
   if (!name) return;
   myName = name;
-  myKey = normalize(name);
+  myKey = toDbKey(name);
   renderAll(); // show the vote UI immediately
 
   await Promise.all(POLLS.map(loadPollVotes)); // refresh in case this name already voted from elsewhere
