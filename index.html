@@ -132,17 +132,27 @@
   .name-gate label{display:block;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;
     color:var(--amber);font-weight:700;margin-bottom:10px;}
   .name-row{display:flex;}
-  .name-row input{
+  .name-row input, .name-row select{
     flex:1;border:1px solid var(--line-soft);background:var(--bg);color:var(--cream);
     border-radius:6px 0 0 6px;padding:10px 12px;font-size:14px;outline:none;font-family:inherit;
+    appearance:none;-webkit-appearance:none;
   }
-  .name-row input:focus{border-color:var(--amber);}
+  .name-row select{
+    background-image:url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23948C9E' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 10px center;padding-right:32px;
+  }
+  .name-row input:focus, .name-row select:focus{border-color:var(--amber);}
   .name-row button{
     border:none;background:var(--amber);color:var(--bg);font-weight:800;font-size:11.5px;
     letter-spacing:0.5px;text-transform:uppercase;padding:0 18px;border-radius:0 6px 6px 0;
     cursor:pointer;
   }
   .name-hint{font-size:10.5px;color:var(--muted);margin-top:10px;line-height:1.5;}
+  .pending-line{margin-top:6px;font-size:10px;color:var(--muted);letter-spacing:0.3px;
+    text-transform:none;line-height:1.5;}
+  .pending-line.all-done{color:var(--amber);}
+  .not-eligible-note{background:var(--panel);border:1px dashed var(--line-soft);border-radius:10px;
+    padding:14px 16px;font-size:12px;color:var(--muted);text-align:center;font-style:italic;}
 
   .whoami{
     display:flex;justify-content:space-between;align-items:center;
@@ -341,16 +351,20 @@
     <div id="nameGate" class="name-gate" style="display:none;">
       <label for="nameInput">¿Cómo te llamas?</label>
       <div class="name-row">
-        <input id="nameInput" type="text" placeholder="Tu nombre" maxlength="24">
+        <select id="nameInput">
+          <option value="" disabled selected>— Elige tu nombre —</option>
+        </select>
         <button id="nameSubmit" type="button">Entrar</button>
       </div>
-      <div class="name-hint">Así evitamos votos duplicados en ambas votaciones. Solo tu grupo verá el nombre. (Si recargas la página tendrás que escribirlo de nuevo, pero tu voto se conserva.)</div>
+      <div class="name-hint">Lista cerrada de invitados — así evitamos votos duplicados o de gente ajena al grupo. Este navegador recordará tu nombre para la próxima vez.</div>
     </div>
     <div id="whoamiBar" class="whoami" style="display:none;">
       <span>Votando como <b id="whoamiName"></b></span>
       <button id="changeName" type="button">No soy yo</button>
     </div>
   </div>
+
+  <div id="deviceWarning" class="status-banner" style="display:none; border-color:var(--amber); color:var(--amber); background:rgba(242,169,59,0.1);"></div>
 
   <div id="statusBanner" class="status-banner" style="display:none;"></div>
 
@@ -393,6 +407,7 @@ const POLLS = [
     optionsElId: "options-cena",
     totalElId: "totalLine-cena",
     color: "amber",
+    eligibilityKey: "cena",
     options: [
       { id: "la_grama", name: "La Grama", place: "Tomares" },
       { id: "caballo_loco", name: "Caballo Loco", place: "Bollullos de la Mitación" },
@@ -406,6 +421,7 @@ const POLLS = [
     optionsElId: "options-postcena",
     totalElId: "totalLine-postcena",
     color: "pink",
+    eligibilityKey: "postcena",
     options: [
       { id: "moon_gines", name: "Moon Ginés", place: "Ginés" },
       { id: "bianca", name: "Bianca", place: "Bormujos" }
@@ -413,6 +429,36 @@ const POLLS = [
     votesByName: {}
   }
 ];
+
+// ---- Lista cerrada de invitados ----
+// cena: puede votar en "Votación — cena" (y también en post-cena)
+// postcena: puede votar en "Votación — post-cena"
+const GUEST_LIST = [
+  { name: "JuanB",       cena: true,  postcena: true },
+  { name: "Varo Rios",   cena: true,  postcena: true },
+  { name: "Lucsypussy",  cena: true,  postcena: true },
+  { name: "Dano",        cena: true,  postcena: true },
+  { name: "Marquitos",   cena: true,  postcena: true },
+  { name: "Lucia🤍",     cena: true,  postcena: true },
+  { name: "Paula",       cena: true,  postcena: true },
+  { name: "Kokito",      cena: true,  postcena: true },
+  { name: "Xehros",      cena: true,  postcena: true },
+  { name: "Fran🍾🎈",    cena: true,  postcena: true },
+  { name: "IsaMari💜",   cena: true,  postcena: true },
+  { name: "Panki",       cena: true,  postcena: true },
+  { name: "FakkaV1",     cena: false, postcena: true },
+  { name: "Julián",      cena: false, postcena: true },
+  { name: "Bochan",      cena: false, postcena: true }
+];
+
+// Precalcula, para cada votación, la lista de nombres con permiso
+POLLS.forEach(poll => {
+  poll.allowedNames = GUEST_LIST.filter(g => g[poll.eligibilityKey]).map(g => g.name);
+});
+
+function isEligible(poll, name) {
+  return poll.allowedNames.includes(name);
+}
 
 // ---- Almacén compartido SIN cuenta de Claude ----
 // Usamos Firebase Realtime Database (Google), con reglas públicas de
@@ -422,9 +468,43 @@ function toDbKey(name) {
   return name.trim().toLowerCase().replace(/\s+/g, " ").replace(/[.#$\[\]/]/g, "_");
 }
 
-// El nombre solo vive en la memoria de esta pestaña (no se guarda entre
-// visitas): así no necesitamos ningún tipo de cuenta ni almacenamiento
-// personal. Si recargas la página, simplemente vuelves a escribir tu nombre.
+// ---- "Recordar" en este navegador (evita duplicados con nombres distintos) ----
+// Ya no estamos dentro de Claude, así que localStorage funciona con normalidad
+// aquí: es solo del dispositivo de cada persona, nadie más lo ve.
+const LOCAL_NAME_KEY = "cena_cumple_local_name_v1";       // último nombre usado en este navegador
+const LOCAL_HISTORY_KEY = "cena_cumple_local_history_v1"; // todos los nombres usados en este navegador
+
+function loadLocalHistory() {
+  try { return JSON.parse(localStorage.getItem(LOCAL_HISTORY_KEY) || "[]"); }
+  catch (e) { return []; }
+}
+
+function rememberNameOnThisBrowser(name) {
+  try {
+    localStorage.setItem(LOCAL_NAME_KEY, name);
+    const hist = loadLocalHistory();
+    if (!hist.includes(name)) {
+      hist.push(name);
+      localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(hist));
+    }
+  } catch (e) { /* localStorage no disponible: seguimos sin recordar nada */ }
+}
+
+function forgetActiveNameOnThisBrowser() {
+  try { localStorage.removeItem(LOCAL_NAME_KEY); } catch (e) {}
+}
+
+function renderDeviceWarning() {
+  const el = document.getElementById("deviceWarning");
+  const hist = loadLocalHistory();
+  if (hist.length > 1) {
+    el.innerHTML = `<span>⚠️ Este navegador ya se usó para votar como: <b>${hist.join(", ")}</b>. Recuerda: un voto por persona.</span>`;
+    el.style.display = "flex";
+  } else {
+    el.style.display = "none";
+  }
+}
+
 let myName = null;
 let myKey = null;
 
@@ -497,19 +577,38 @@ function renderNameUI() {
   }
 }
 
+function pendingInfo(poll) {
+  const votedKeys = new Set(Object.keys(poll.votesByName));
+  const voted = poll.allowedNames.filter(n => votedKeys.has(toDbKey(n)));
+  const pending = poll.allowedNames.filter(n => !votedKeys.has(toDbKey(n)));
+  return { votedCount: voted.length, totalInvited: poll.allowedNames.length, pending };
+}
+
 function renderPoll(poll) {
   const { counts, voters } = countsAndVoters(poll);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const isPink = poll.color === "pink";
 
-  document.getElementById(poll.totalElId).innerHTML = total > 0
+  const { votedCount, totalInvited, pending } = pendingInfo(poll);
+  let totalHtml = total > 0
     ? `<b>${total}</b> voto${total === 1 ? "" : "s"} hasta ahora`
     : `Sé el primero en votar`;
+  totalHtml += ` &nbsp;·&nbsp; <b>${votedCount}/${totalInvited}</b> han votado`;
+  totalHtml += pending.length
+    ? `<div class="pending-line">Faltan: ${pending.join(", ")}</div>`
+    : `<div class="pending-line all-done">¡Han votado todos! 🎉</div>`;
+  document.getElementById(poll.totalElId).innerHTML = totalHtml;
+
+  const container = document.getElementById(poll.optionsElId);
+
+  if (myName && !isEligible(poll, myName)) {
+    container.innerHTML = `<div class="not-eligible-note">Esta votación no incluye tu nombre en la lista de invitados.</div>`;
+    return;
+  }
 
   const maxVotes = Math.max(...poll.options.map(o => counts[o.id]), 0);
   const myChoice = myKey && poll.votesByName[myKey] ? poll.votesByName[myKey].choice : null;
 
-  const container = document.getElementById(poll.optionsElId);
   container.innerHTML = "";
 
   poll.options.forEach(o => {
@@ -549,11 +648,12 @@ function renderPoll(poll) {
 
 function renderAll() {
   renderNameUI();
+  renderDeviceWarning();
   POLLS.forEach(renderPoll);
 }
 
 async function handleVote(poll, id) {
-  if (!myName) return;
+  if (!myName || !isEligible(poll, myName)) return;
   const current = poll.votesByName[myKey];
   if (current && current.choice === id) return;
 
@@ -575,6 +675,7 @@ async function setName(rawName) {
   if (!name) return;
   myName = name;
   myKey = toDbKey(name);
+  rememberNameOnThisBrowser(name);
   renderAll(); // show the vote UI immediately
 
   await Promise.all(POLLS.map(loadPollVotes)); // refresh in case this name already voted from elsewhere
@@ -588,11 +689,38 @@ document.getElementById("nameInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") setName(document.getElementById("nameInput").value);
 });
 document.getElementById("changeName").addEventListener("click", () => {
+  const hist = loadLocalHistory();
+  if (hist.length >= 1) {
+    const ok = confirm(
+      `Este navegador ya se usó para votar como "${hist[hist.length - 1]}"` +
+      (hist.length > 1 ? ` (y antes como: ${hist.slice(0, -1).join(", ")})` : "") +
+      `.\n\n¿Seguro que eres otra persona? Recuerda que debería ser un voto por persona.`
+    );
+    if (!ok) return;
+  }
   myName = null; myKey = null;
+  forgetActiveNameOnThisBrowser();
   renderAll();
 });
 
+function populateNameSelect() {
+  const select = document.getElementById("nameInput");
+  GUEST_LIST.forEach(g => {
+    const opt = document.createElement("option");
+    opt.value = g.name;
+    opt.textContent = g.name;
+    select.appendChild(opt);
+  });
+}
+
 async function init() {
+  populateNameSelect();
+  const savedName = (() => { try { return localStorage.getItem(LOCAL_NAME_KEY); } catch (e) { return null; } })();
+  if (savedName) {
+    myName = savedName;
+    myKey = toDbKey(savedName);
+    document.getElementById("nameInput").value = savedName;
+  }
   await Promise.all(POLLS.map(loadPollVotes));
   renderAll();
 }
